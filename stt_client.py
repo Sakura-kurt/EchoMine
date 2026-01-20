@@ -1,7 +1,11 @@
 import asyncio
+import sys
 import sounddevice as sd
 import numpy as np
 import websockets
+
+# Get server from command line, default to localhost
+SERVER = sys.argv[1] if len(sys.argv) > 1 else "127.0.0.1"
 
 SAMPLE_RATE = 16000
 FRAME_MS = 20
@@ -12,7 +16,7 @@ def float_to_pcm16(x: np.ndarray) -> bytes:
     return (x * 32767).astype(np.int16).tobytes()
 
 async def main():
-    uri = "ws://127.0.0.1:8000/ws/stt"
+    uri = f"ws://{SERVER}/ws/stt"
     async with websockets.connect(uri, max_size=None) as ws:
         print("connected")
         print("server:", await ws.recv())  # ready
