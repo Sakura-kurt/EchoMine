@@ -40,22 +40,28 @@ async def main():
             loop.call_soon_threadsafe(q.put_nowait, pcm)
 
         async def sender():
-            count = 0
-            t0 = asyncio.get_event_loop().time()
-            while True:
-                frame = await q.get()
-                await ws.send(frame)
-                count += 1
-                now = asyncio.get_event_loop().time()
-                if now - t0 >= 1.0:
-                    print(f"[client] sent {count} frames/sec, last={len(frame)} bytes")
-                    count = 0
-                    t0 = now
+            try:
+                count = 0
+                t0 = asyncio.get_event_loop().time()
+                while True:
+                    frame = await q.get()
+                    await ws.send(frame)
+                    count += 1
+                    now = asyncio.get_event_loop().time()
+                    if now - t0 >= 1.0:
+                        print(f"[client] sent {count} frames/sec, last={len(frame)} bytes")
+                        count = 0
+                        t0 = now
+            except asyncio.CancelledError:
+                pass
 
         async def receiver():
-            while True:
-                msg = await ws.recv()
-                print("recv:", msg)
+            try:
+                while True:
+                    msg = await ws.recv()
+                    print("recv:", msg)
+            except asyncio.CancelledError:
+                pass
 
         # blocksize 必须匹配 20ms 帧，否则 frame_bytes 不对
         with sd.InputStream(
@@ -68,4 +74,7 @@ async def main():
             await asyncio.gather(sender(), receiver())
 
 if __name__ == "__main__":
-    asyncio.run(main())
+    try:
+        asyncio.run(main())
+    except KeyboardInterrupt:
+        print("\nClient stopped.")
