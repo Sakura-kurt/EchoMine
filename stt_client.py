@@ -16,7 +16,9 @@ def float_to_pcm16(x: np.ndarray) -> bytes:
     return (x * 32767).astype(np.int16).tobytes()
 
 async def main():
-    uri = f"ws://{SERVER}/ws/stt"
+    # Default to /ws/stt, use /ws/chat for stt_rag_server
+    endpoint = sys.argv[2] if len(sys.argv) > 2 else "/ws/stt"
+    uri = f"ws://{SERVER}{endpoint}"
     async with websockets.connect(uri, max_size=None) as ws:
         print("connected")
         print("server:", await ws.recv())  # ready
