@@ -1,0 +1,19 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+# Install Python dependencies
+RUN pip install --no-cache-dir \
+    fastapi \
+    uvicorn \
+    websockets \
+    redis \
+    pyjwt \
+    bcrypt \
+    pydantic
+
+COPY gateway/ ./gateway/
+
+EXPOSE 8000
+
+CMD ["uvicorn", "gateway.main:app", "--host", "0.0.0.0", "--port", "8000"]
