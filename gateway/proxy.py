@@ -121,6 +121,17 @@ class STTProxy:
                         trace_id=self.trace_id
                     )
 
+            elif msg_type == "answer":
+                # RAG answer relayed through STT - log to session history
+                response = data.get("response", "")
+                if response.strip():
+                    await session_manager.add_to_history(
+                        self.session_id,
+                        role="assistant",
+                        text=response,
+                        trace_id=self.trace_id
+                    )
+
             elif msg_type == "error":
                 trace_logger.transcription_error(
                     self.trace_id,

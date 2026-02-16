@@ -130,7 +130,15 @@ class STTClient:
                                 print("[speech] Stopped speaking, processing...")
                             elif msg_type == "final":
                                 text = data.get("text", "")
-                                print(f"\n>>> TRANSCRIPTION: {text}\n")
+                                seq = data.get("seq", "")
+                                print(f"\n>>> TRANSCRIPTION (seq={seq}): {text}\n")
+                            elif msg_type == "answer":
+                                query = data.get("query", "")
+                                response = data.get("response", "")
+                                seq = data.get("seq", "")
+                                print(f"\n<<< ANSWER (seq={seq})")
+                                print(f"    Q: {query}")
+                                print(f"    A: {response}\n")
                             elif msg_type == "error":
                                 print(f"[error] {data.get('stage')}: {data.get('message')}")
                             else:

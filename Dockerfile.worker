@@ -1,0 +1,24 @@
+FROM python:3.10-slim
+
+WORKDIR /app
+
+RUN apt-get update && apt-get install -y \
+    build-essential \
+    && rm -rf /var/lib/apt/lists/*
+
+RUN pip install --no-cache-dir \
+    aio-pika \
+    langchain-ollama \
+    langchain-chroma \
+    langchain-community \
+    langchain-text-splitters \
+    langchain-classic \
+    langchain-core \
+    chromadb
+
+COPY rag_pipeline.py .
+COPY rabbitmq_config.py .
+COPY rag_worker.py .
+COPY memory_worker.py .
+
+CMD ["python", "rag_worker.py"]

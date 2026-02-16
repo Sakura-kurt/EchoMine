@@ -15,10 +15,12 @@ RUN pip install --no-cache-dir \
     websockets \
     numpy \
     webrtcvad \
-    faster-whisper
+    faster-whisper \
+    aio-pika
 
 COPY stt_server.py .
+COPY rabbitmq_config.py .
 
-EXPOSE 8000
+EXPOSE 8001
 
-CMD ["uvicorn", "stt_server:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "stt_server:app", "--host", "0.0.0.0", "--port", "8001"]

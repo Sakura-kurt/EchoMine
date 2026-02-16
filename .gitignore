@@ -16,3 +16,6 @@ __pycache__/
 dist/
 build/
 *.egg-info/
+
+# Generated data
+chroma_db/

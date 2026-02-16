@@ -1,11 +1,19 @@
 import asyncio
+import json
 import time
+import uuid
 from typing import Dict
 
+import aio_pika
 import numpy as np
 import webrtcvad
-from fastapi import FastAPI, WebSocket, WebSocketDisconnect
+from fastapi import FastAPI, WebSocket, WebSocketDisconnect, Query
 from faster_whisper import WhisperModel
+
+from rabbitmq_config import (
+    get_connection, setup_exchanges_and_queues,
+    RAG_EXCHANGE,
+)
 
 app = FastAPI(title="Streaming STT (VAD + FasterWhisper)")
 
@@ -23,6 +31,11 @@ MIN_UTTERANCE_MS = 250
 # ===== Whisper model (tiny first for stability/speed) =====
 model = WhisperModel("tiny", device="cpu", compute_type="int8")
 
+# ===== RabbitMQ state =====
+rmq_connection: aio_pika.abc.AbstractRobustConnection | None = None
+rmq_channel: aio_pika.abc.AbstractChannel | None = None
+rag_exchange: aio_pika.abc.AbstractExchange | None = None
+
 
 def transcribe_blocking(pcm: bytes) -> str:
     """
@@ -34,24 +47,84 @@ def transcribe_blocking(pcm: bytes) -> str:
     return "".join(seg.text for seg in segments).strip()
 
 
+@app.on_event("startup")
+async def startup():
+    global rmq_connection, rmq_channel, rag_exchange
+    print("[stt] Connecting to RabbitMQ...")
+    rmq_connection = await get_connection()
+    rmq_channel = await rmq_connection.channel()
+    rag_ex, _ = await setup_exchanges_and_queues(rmq_channel)
+    rag_exchange = rag_ex
+    print("[stt] RabbitMQ ready.")
+
+
+@app.on_event("shutdown")
+async def shutdown():
+    if rmq_connection and not rmq_connection.is_closed:
+        await rmq_connection.close()
+        print("[stt] RabbitMQ connection closed.")
+
+
 @app.websocket("/ws/stt")
-async def ws_stt(ws: WebSocket):
+async def ws_stt(ws: WebSocket, forward_transcription: bool = Query(True)):
     await ws.accept()
+
+    connection_id = uuid.uuid4().hex[:16]
+
     await ws.send_json({
         "type": "ready",
         "sample_rate": SAMPLE_RATE,
         "frame_ms": FRAME_MS,
         "frame_bytes": FRAME_BYTES,
-        "silence_cutoff_ms": SILENCE_CUTOFF_MS
+        "silence_cutoff_ms": SILENCE_CUTOFF_MS,
+        "connection_id": connection_id,
     })
+
+    # Per-connection reply queue
+    reply_channel = await rmq_connection.channel()
+    reply_queue = await reply_channel.declare_queue(
+        f"rag.replies.{connection_id}",
+        exclusive=True,
+        auto_delete=True,
+    )
 
     speech_buf = bytearray()
     in_speech = False
     last_voice_ts = time.time()
+    seq = 0
 
     # recv stats
     recv_count = 0
     last_log = time.time()
+
+    # Background task: consume replies and send to client
+    reply_task = None
+    ws_closed = False
+
+    async def consume_replies():
+        try:
+            async with reply_queue.iterator() as queue_iter:
+                async for message in queue_iter:
+                    async with message.process():
+                        if ws_closed:
+                            break
+                        try:
+                            data = json.loads(message.body.decode())
+                            await ws.send_json({
+                                "type": "answer",
+                                "seq": data.get("seq"),
+                                "query": data.get("query", ""),
+                                "response": data.get("response", ""),
+                            })
+                        except Exception as e:
+                            print(f"[stt] reply send error: {e}")
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            if not ws_closed:
+                print(f"[stt] reply consumer error: {e}")
+
+    reply_task = asyncio.create_task(consume_replies())
 
     try:
         while True:
@@ -105,7 +178,26 @@ async def ws_stt(ws: WebSocket):
                                 loop.run_in_executor(None, transcribe_blocking, pcm),
                                 timeout=30.0
                             )
-                            await ws.send_json({"type": "final", "text": text})
+
+                            seq += 1
+
+                            if forward_transcription:
+                                await ws.send_json({"type": "final", "text": text, "seq": seq})
+
+                            # Publish to RabbitMQ for RAG processing
+                            if text.strip() and rag_exchange:
+                                await rag_exchange.publish(
+                                    aio_pika.Message(
+                                        body=json.dumps({
+                                            "text": text,
+                                            "connection_id": connection_id,
+                                            "seq": seq,
+                                        }).encode(),
+                                        delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
+                                    ),
+                                    routing_key="queries",
+                                )
+
                         except asyncio.TimeoutError:
                             await ws.send_json({"type": "error", "stage": "transcribe", "message": "timeout"})
                         except Exception as e:
@@ -114,7 +206,6 @@ async def ws_stt(ws: WebSocket):
 
     except WebSocketDisconnect:
         print("[server] client disconnected")
-        return
     except Exception as e:
         # last-resort catch: still try to tell client
         try:
@@ -122,4 +213,15 @@ async def ws_stt(ws: WebSocket):
         except Exception:
             pass
         print("[server] fatal:", repr(e))
-        return
+    finally:
+        ws_closed = True
+        if reply_task:
+            reply_task.cancel()
+            try:
+                await reply_task
+            except asyncio.CancelledError:
+                pass
+        try:
+            await reply_channel.close()
+        except Exception:
+            pass

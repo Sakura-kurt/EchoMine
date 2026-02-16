@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   redis:
     image: redis:7-alpine
@@ -16,6 +14,21 @@ services:
       timeout: 5s
       retries: 3
 
+  rabbitmq:
+    image: rabbitmq:3-management-alpine
+    container_name: echomine-rabbitmq
+    restart: unless-stopped
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - rabbitmq_data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
   stt-server:
     build:
       context: .
@@ -25,8 +38,47 @@ services:
     expose:
       - "8001"
     command: uvicorn stt_server:app --host 0.0.0.0 --port 8001
+    environment:
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
     volumes:
       - whisper-cache:/root/.cache/huggingface
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  rag-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: echomine-rag-worker
+    restart: unless-stopped
+    command: python rag_worker.py
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./knowledge:/app/knowledge
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
+
+  memory-worker:
+    build:
+      context: .
+      dockerfile: Dockerfile.worker
+    container_name: echomine-memory-worker
+    restart: unless-stopped
+    command: python memory_worker.py
+    environment:
+      - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
+      - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    volumes:
+      - ./knowledge:/app/knowledge
+      - ./chroma_db:/app/chroma_db
+    depends_on:
+      rabbitmq:
+        condition: service_healthy
 
   gateway:
     build:
@@ -60,3 +112,4 @@ services:
 volumes:
   whisper-cache:
   redis_data:
+  rabbitmq_data:
