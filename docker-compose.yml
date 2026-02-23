@@ -39,7 +39,10 @@ services:
       - "8001"
     command: uvicorn stt_server:app --host 0.0.0.0 --port 8001
     environment:
+      - PYTHONUNBUFFERED=1
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - whisper-cache:/root/.cache/huggingface
     depends_on:
@@ -54,8 +57,11 @@ services:
     restart: unless-stopped
     command: python rag_worker.py
     environment:
+      - PYTHONUNBUFFERED=1
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./knowledge:/app/knowledge
       - ./chroma_db:/app/chroma_db
@@ -71,8 +77,11 @@ services:
     restart: unless-stopped
     command: python memory_worker.py
     environment:
+      - PYTHONUNBUFFERED=1
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     volumes:
       - ./knowledge:/app/knowledge
       - ./chroma_db:/app/chroma_db
