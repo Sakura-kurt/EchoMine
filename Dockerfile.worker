@@ -16,6 +16,7 @@ RUN pip install --no-cache-dir \
     langchain-core \
     chromadb
 
+COPY schemas.py .
 COPY rag_pipeline.py .
 COPY rabbitmq_config.py .
 COPY rag_worker.py .

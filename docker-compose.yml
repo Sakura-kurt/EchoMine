@@ -41,6 +41,7 @@ services:
     environment:
       - PYTHONUNBUFFERED=1
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - STT_LANGUAGE=zh
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:

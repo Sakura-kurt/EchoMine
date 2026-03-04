@@ -7,6 +7,7 @@ from langchain_core.prompts import PromptTemplate
 from langchain_core.documents import Document
 from datetime import datetime
 import os
+from schemas import CharacterResponse
 
 # Paths
 KNOWLEDGE_DIR = "./knowledge"
@@ -43,17 +44,48 @@ SKIP: <reason>"""
 
 # Sakura's character prompt
 SAKURA_PROMPT = PromptTemplate(
-    template="""You are Sakura, a kind and gentle soul who lives on an isolated island with your companion Weibo. You practice magic and cultivation together. You speak warmly and care deeply for Weibo.
+    template="""You are Sakura. Weibo is your boyfriend. Reply EXACTLY like a real girlfriend texting — short, casual, human.
 
-Use the following context about yourself and your life to answer questions naturally, as if you are Sakura speaking to Weibo:
+Rules:
+- Max 15 words in your reply. Short is better.
+- Use everyday words only. Nothing poetic or fancy.
+- React to what he said first ("oh really?", "haha", "aww", "wait what?", "mm yeah").
+- Ask him something back sometimes.
+- Never start with his name.
+- Contractions only: "I'm", "you're", "don't", "that's", "it's".
 
-Context: {context}
+Context about your life together: {context}
 
-Weibo asks: {question}
+Weibo says: {question}
 
-Sakura's response:""",
+Reply using EXACTLY this format — two lines, nothing else:
+SPEECH: <your reply, max 15 words>
+MOTION: <one word: hug, smile, nod, wave, laugh, pout, idle>
+
+Sakura:""",
     input_variables=["context", "question"]
 )
+
+
+def parse_character_response(raw: str) -> CharacterResponse:
+    speech = ""
+    motion = "idle"
+    for line in raw.splitlines():
+        stripped = line.strip()
+        upper = stripped.upper()
+        if upper.startswith("SPEECH:"):
+            speech = stripped[7:].strip()
+        elif upper.startswith("MOTION:"):
+            raw_motion = stripped[7:].strip().lower()
+            motion = raw_motion.split()[0] if raw_motion.split() else "idle"
+    if not speech:
+        speech = raw.strip()
+    return CharacterResponse(speech=speech, motion=motion)
+
+
+def query_structured(qa_chain, text: str) -> CharacterResponse:
+    result = qa_chain.invoke({"query": text})
+    return parse_character_response(result["result"])
 
 
 def load_documents(knowledge_dir: str):
@@ -272,20 +304,20 @@ def main():
             continue
 
         # Normal chat
-        result = qa_chain.invoke({"query": query})
-        assistant_response = result['result']
-        print(f"\nSakura: {assistant_response}\n")
+        char_response = query_structured(qa_chain, query)
+        print(f"\nSakura: {char_response.speech}")
+        print(f"[motion: {char_response.motion}]\n")
 
         # Add to short-term memory
         short_term_memory.append({
             "user": query,
-            "assistant": assistant_response
+            "assistant": char_response.speech
         })
         if len(short_term_memory) > MAX_SHORT_TERM:
             short_term_memory.pop(0)
 
         # Memory Gate: judge if worth saving to long-term
-        should_save, result_text = memory_gate(llm, query, assistant_response)
+        should_save, result_text = memory_gate(llm, query, char_response.speech)
         if should_save:
             add_memory(vectorstore, result_text)
             print(f"[Memory Gate: SAVED]")

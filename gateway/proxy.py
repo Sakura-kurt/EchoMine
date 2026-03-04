@@ -123,12 +123,13 @@ class STTProxy:
 
             elif msg_type == "answer":
                 # RAG answer relayed through STT - log to session history
-                response = data.get("response", "")
-                if response.strip():
+                raw_response = data.get("response", {})
+                speech_text = raw_response.get("speech", "") if isinstance(raw_response, dict) else str(raw_response)
+                if speech_text.strip():
                     await session_manager.add_to_history(
                         self.session_id,
                         role="assistant",
-                        text=response,
+                        text=speech_text,
                         trace_id=self.trace_id
                     )
 

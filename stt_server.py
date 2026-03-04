@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import time
 import uuid
 from typing import Dict
@@ -43,7 +44,7 @@ def transcribe_blocking(pcm: bytes) -> str:
     Use numpy waveform to avoid PyAV file-like issues.
     """
     audio = np.frombuffer(pcm, dtype=np.int16).astype(np.float32) / 32768.0
-    segments, _info = model.transcribe(audio, language="en", vad_filter=False)
+    segments, _info = model.transcribe(audio, language=os.getenv("STT_LANGUAGE", "en"), vad_filter=False)
     return "".join(seg.text for seg in segments).strip()
 
 

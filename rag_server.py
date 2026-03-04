@@ -7,7 +7,7 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from rag_pipeline import (
     load_vectorstore, create_vectorstore, load_documents,
-    create_qa_chain, memory_gate, add_memory,
+    create_qa_chain, memory_gate, add_memory, query_structured,
     KNOWLEDGE_DIR, CHROMA_DIR,
 )
 
@@ -66,17 +66,16 @@ async def query(req: QueryRequest):
         return {"response": "", "error": "RAG pipeline not initialized"}
 
     loop = asyncio.get_running_loop()
-    result = await loop.run_in_executor(
-        None, lambda: qa_chain.invoke({"query": req.text})
+    char_response = await loop.run_in_executor(
+        None, lambda: query_structured(qa_chain, req.text)
     )
-    response_text = result["result"]
 
-    # Memory gate (fire and forget)
+    # Memory gate (fire and forget) — speech only
     loop.run_in_executor(
-        None, _memory_gate_sync, req.text, response_text
+        None, _memory_gate_sync, req.text, char_response.speech
     )
 
-    return {"response": response_text}
+    return {"response": char_response.model_dump()}
 
 
 @app.post("/memory")

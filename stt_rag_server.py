@@ -10,7 +10,7 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from rag_pipeline import (
     load_vectorstore, create_vectorstore, load_documents,
-    create_qa_chain, memory_gate, add_memory,
+    create_qa_chain, memory_gate, add_memory, query_structured,
     KNOWLEDGE_DIR, CHROMA_DIR,
 )
 import os
@@ -67,9 +67,8 @@ def transcribe_blocking(pcm: bytes) -> str:
     return "".join(seg.text for seg in segments).strip()
 
 
-def rag_query_blocking(query: str) -> str:
-    result = qa_chain.invoke({"query": query})
-    return result["result"]
+def rag_query_blocking(query: str):
+    return query_structured(qa_chain, query)
 
 
 def memory_gate_blocking(user_msg: str, assistant_msg: str):
@@ -162,12 +161,16 @@ async def ws_chat(ws: WebSocket):
 
                         # Step 2: RAG query
                         try:
-                            response = await asyncio.wait_for(
+                            char_response = await asyncio.wait_for(
                                 loop.run_in_executor(None, rag_query_blocking, text),
                                 timeout=60.0,
                             )
-                            await ws.send_json({"type": "answer", "query": text, "response": response})
-                            print(f"[rag] \"{response[:80]}\"")
+                            await ws.send_json({
+                                "type": "answer",
+                                "query": text,
+                                "response": char_response.model_dump(),
+                            })
+                            print(f"[rag] speech=\"{char_response.speech[:80]}\" motion={char_response.motion}")
                         except asyncio.TimeoutError:
                             await ws.send_json({"type": "error", "stage": "rag", "message": "timeout"})
                             continue
@@ -175,8 +178,8 @@ async def ws_chat(ws: WebSocket):
                             await ws.send_json({"type": "error", "stage": "rag", "message": repr(e)})
                             continue
 
-                        # Step 3: Memory gate (fire and forget)
-                        loop.run_in_executor(None, memory_gate_blocking, text, response)
+                        # Step 3: Memory gate (fire and forget) — speech only
+                        loop.run_in_executor(None, memory_gate_blocking, text, char_response.speech)
 
     except WebSocketDisconnect:
         print("[server] client disconnected")

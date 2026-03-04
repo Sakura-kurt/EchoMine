@@ -7,7 +7,7 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 
 from rag_pipeline import (
     load_vectorstore, create_vectorstore, load_documents,
-    create_qa_chain,
+    create_qa_chain, query_structured,
     KNOWLEDGE_DIR, CHROMA_DIR,
 )
 from rabbitmq_config import (
@@ -66,29 +66,28 @@ async def main():
 
             print(f"[rag-worker] Processing seq={seq}: {text[:60]}...")
 
-            result = await loop.run_in_executor(
-                None, lambda: qa_chain.invoke({"query": text})
+            char_response = await loop.run_in_executor(
+                None, lambda: query_structured(qa_chain, text)
             )
-            response_text = result["result"]
 
             # Publish reply to the connection-specific reply queue
             await channel.default_exchange.publish(
                 aio_pika.Message(
                     body=json.dumps({
                         "query": text,
-                        "response": response_text,
+                        "response": char_response.model_dump(),
                         "seq": seq,
                     }).encode(),
                 ),
                 routing_key=f"rag.replies.{connection_id}",
             )
 
-            # Publish memory gate job
+            # Publish memory gate job — pass only speech
             await memory_exchange.publish(
                 aio_pika.Message(
                     body=json.dumps({
                         "user_message": text,
-                        "assistant_response": response_text,
+                        "assistant_response": char_response.speech,
                     }).encode(),
                     delivery_mode=aio_pika.DeliveryMode.PERSISTENT,
                 ),
@@ -96,7 +95,7 @@ async def main():
             )
 
             await message.ack()
-            print(f"[rag-worker] seq={seq} done, reply sent.")
+            print(f"[rag-worker] seq={seq} done, reply sent. motion={char_response.motion}")
 
         except Exception as e:
             print(f"[rag-worker] Error (retry {retries + 1}/{MAX_RETRIES}): {e}")
