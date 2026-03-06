@@ -50,6 +50,15 @@ services:
       rabbitmq:
         condition: service_healthy
 
+  chromadb:
+    image: chromadb/chroma:latest
+    container_name: echomine-chromadb
+    restart: unless-stopped
+    expose:
+      - "8000"
+    volumes:
+      - chroma_data:/chroma/chroma
+
   rag-worker:
     build:
       context: .
@@ -61,14 +70,17 @@ services:
       - PYTHONUNBUFFERED=1
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./knowledge:/app/knowledge
-      - ./chroma_db:/app/chroma_db
     depends_on:
       rabbitmq:
         condition: service_healthy
+      chromadb:
+        condition: service_started
 
   memory-worker:
     build:
@@ -81,14 +93,17 @@ services:
       - PYTHONUNBUFFERED=1
       - OLLAMA_HOST=${OLLAMA_HOST:-http://host.docker.internal:11434}
       - RABBITMQ_URL=amqp://guest:guest@rabbitmq:5672/
+      - CHROMA_HOST=chromadb
+      - CHROMA_PORT=8000
     extra_hosts:
       - "host.docker.internal:host-gateway"
     volumes:
       - ./knowledge:/app/knowledge
-      - ./chroma_db:/app/chroma_db
     depends_on:
       rabbitmq:
         condition: service_healthy
+      chromadb:
+        condition: service_started
 
   gateway:
     build:
@@ -123,3 +138,4 @@ volumes:
   whisper-cache:
   redis_data:
   rabbitmq_data:
+  chroma_data:

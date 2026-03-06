@@ -1,3 +1,4 @@
+import chromadb as _chromadb
 from langchain_ollama import ChatOllama, OllamaEmbeddings
 from langchain_chroma import Chroma
 from langchain_community.document_loaders import DirectoryLoader, TextLoader
@@ -11,8 +12,25 @@ from schemas import CharacterResponse
 
 # Paths
 KNOWLEDGE_DIR = "./knowledge"
-CHROMA_DIR = "./chroma_db"
 MEMORIES_FILE = os.path.join(KNOWLEDGE_DIR, "memories.txt")
+
+# ChromaDB HTTP server config
+CHROMA_HOST = os.getenv("CHROMA_HOST", "localhost")
+CHROMA_PORT = int(os.getenv("CHROMA_PORT", "8000"))
+COLLECTION_NAME = "sakura_knowledge"
+
+
+def _get_chroma_client() -> _chromadb.HttpClient:
+    return _chromadb.HttpClient(host=CHROMA_HOST, port=CHROMA_PORT)
+
+
+def vectorstore_has_data() -> bool:
+    """Check if the ChromaDB collection already has documents."""
+    try:
+        col = _get_chroma_client().get_collection(COLLECTION_NAME)
+        return col.count() > 0
+    except Exception:
+        return False
 
 # Memory Gate prompt - decides if a message should be saved
 MEMORY_GATE_PROMPT = """You are a strict memory filter. Be VERY selective - most conversations should be SKIPPED.
@@ -99,8 +117,8 @@ def load_documents(knowledge_dir: str):
     return loader.load()
 
 
-def create_vectorstore(documents, embeddings, persist_dir: str):
-    """Create and persist a Chroma vector store."""
+def create_vectorstore(documents, embeddings, persist_dir: str = None):
+    """Create a Chroma vector store via HTTP server."""
     text_splitter = RecursiveCharacterTextSplitter(
         chunk_size=500,
         chunk_overlap=100
@@ -111,16 +129,18 @@ def create_vectorstore(documents, embeddings, persist_dir: str):
     vectorstore = Chroma.from_documents(
         documents=chunks,
         embedding=embeddings,
-        persist_directory=persist_dir
+        client=_get_chroma_client(),
+        collection_name=COLLECTION_NAME,
     )
     return vectorstore
 
 
-def load_vectorstore(embeddings, persist_dir: str):
-    """Load existing vector store from disk."""
+def load_vectorstore(embeddings, persist_dir: str = None):
+    """Load vector store from ChromaDB HTTP server."""
     return Chroma(
-        persist_directory=persist_dir,
-        embedding_function=embeddings
+        client=_get_chroma_client(),
+        collection_name=COLLECTION_NAME,
+        embedding_function=embeddings,
     )
 
 
@@ -135,18 +155,18 @@ def create_qa_chain(llm, vectorstore):
     )
 
 
-def rebuild_vectorstore(embeddings, knowledge_dir: str, persist_dir: str):
-    """Rebuild vector store from scratch."""
-    # Remove existing database
-    import shutil
-    if os.path.exists(persist_dir):
-        shutil.rmtree(persist_dir)
+def rebuild_vectorstore(embeddings, knowledge_dir: str, persist_dir: str = None):
+    """Rebuild vector store from scratch via HTTP server."""
+    try:
+        _get_chroma_client().delete_collection(COLLECTION_NAME)
+    except Exception:
+        pass
 
     documents = load_documents(knowledge_dir)
     if not documents:
         print("No documents found in knowledge directory!")
         return None
-    return create_vectorstore(documents, embeddings, persist_dir)
+    return create_vectorstore(documents, embeddings)
 
 
 def add_memory(vectorstore, memory_text: str):
@@ -193,16 +213,16 @@ def main():
     embeddings = OllamaEmbeddings(model="nomic-embed-text")
 
     # Check if vector store exists
-    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
+    if vectorstore_has_data():
         print("Loading existing vector store...")
-        vectorstore = load_vectorstore(embeddings, CHROMA_DIR)
+        vectorstore = load_vectorstore(embeddings)
     else:
         print("Creating new vector store...")
         documents = load_documents(KNOWLEDGE_DIR)
         if not documents:
             print("No documents found in knowledge directory!")
             return
-        vectorstore = create_vectorstore(documents, embeddings, CHROMA_DIR)
+        vectorstore = create_vectorstore(documents, embeddings)
 
     # Create QA chain
     qa_chain = create_qa_chain(llm, vectorstore)
@@ -263,7 +283,7 @@ def main():
         # Command: rebuild
         if query.lower() in ['/rebuild', 'rebuild']:
             print("Rebuilding vector store...")
-            vectorstore = rebuild_vectorstore(embeddings, KNOWLEDGE_DIR, CHROMA_DIR)
+            vectorstore = rebuild_vectorstore(embeddings, KNOWLEDGE_DIR)
             if vectorstore:
                 qa_chain = create_qa_chain(llm, vectorstore)
                 retriever = vectorstore.as_retriever(search_kwargs={"k": 5})

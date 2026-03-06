@@ -8,7 +8,8 @@ from langchain_ollama import ChatOllama, OllamaEmbeddings
 from rag_pipeline import (
     load_vectorstore, create_vectorstore, load_documents,
     memory_gate, add_memory,
-    KNOWLEDGE_DIR, CHROMA_DIR,
+    vectorstore_has_data,
+    KNOWLEDGE_DIR,
 )
 from rabbitmq_config import (
     get_connection, setup_exchanges_and_queues,
@@ -26,12 +27,12 @@ async def main():
     embeddings = OllamaEmbeddings(model="nomic-embed-text", base_url=OLLAMA_HOST)
 
     print("[memory-worker] Loading vector store...")
-    if os.path.exists(CHROMA_DIR) and os.listdir(CHROMA_DIR):
-        vectorstore = load_vectorstore(embeddings, CHROMA_DIR)
+    if vectorstore_has_data():
+        vectorstore = load_vectorstore(embeddings)
     else:
         documents = load_documents(KNOWLEDGE_DIR)
         if documents:
-            vectorstore = create_vectorstore(documents, embeddings, CHROMA_DIR)
+            vectorstore = create_vectorstore(documents, embeddings)
         else:
             print("[memory-worker] WARNING: No knowledge documents found!")
             return
